@@ -3,7 +3,7 @@
 import type { ReactNode } from "react"
 import { Search as SearchIcon, X as CloseIcon, RefreshCw } from "lucide-react"
 
-export type HeaderToolbarProps = {
+export type HeaderToolbarProps = { 
   /** Section title (rendered as an <h2>). */
   title: string
   /** Optional subtitle — a node so callers can pass a rich/highlighted count. */

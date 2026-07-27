@@ -152,7 +152,11 @@ export function DashboardShell({
     )
   }
 
-  const NavLinks = () => (
+  // A plain element, NOT an inline `const NavLinks = () => …` component: defining
+  // a component in the render body gives it a new function identity every render,
+  // so React remounts the whole <nav> on each navigation (pathname change) —
+  // wiping the sidebar's scroll position and hover state.
+  const navLinks = (
     <nav className="flex-1 overflow-y-auto px-3 py-3 scrollbar-none space-y-0.5">
       {resolvedSections.map((section, sIdx) => {
         if (section.type === "item") {
@@ -337,7 +341,7 @@ export function DashboardShell({
         />
 
         {/* ── SCROLLABLE: Nav ── */}
-        <NavLinks />
+        {navLinks}
       </aside>
 
       {/* ── Main content ──────────────────────────────────────────────── */}
