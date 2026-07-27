@@ -9,15 +9,42 @@ import { COUNTRY_CODES } from "@/lib/user-service"
 import { PhoneCountrySelect } from "@/components/phone-country-select"
 import {
   Phone, Mail, Save, Loader2, CheckCircle2, AlertCircle,
-  RefreshCcw, Info, CreditCard, Download,
+  RefreshCcw, Info, CreditCard, Download, Palette,
 } from "lucide-react"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const FRONT_URL = "https://hefwmaoborpfuyhbguzv.supabase.co/storage/v1/object/public/fhi_global/business-card-front.png"
 const BACK_URL  = "https://hefwmaoborpfuyhbguzv.supabase.co/storage/v1/object/public/fhi_global/business-card-back.png"
+const LOGO_WHITE = "/FHI_Branding_White.png"
+const LOGO_DARK  = "/FHI_Branding.png"
 const EXPORT_W  = 2100
 const EXPORT_H  = 1200
 const API_BASE  = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+
+const TITLE_TEXT = "INTERNATIONAL PROPERTY ENDORSER"
+const SITE_TEXT  = "www.fhiglobal.ae"
+
+const NAVY       = "#001f3f"
+const NAVY_DEEP  = "#001428"
+const GOLD       = "#ca9104"
+const GOLD_LIGHT = "#e9b949"
+
+const FONT_STACK = "'Outfit', Arial, sans-serif"
+
+// ── Designs ──────────────────────────────────────────────────────────────────
+type DesignId = "classic" | "executive" | "platinum"
+
+const DESIGNS: { id: DesignId; name: string; tagline: string }[] = [
+  { id: "classic",   name: "Classic Navy",   tagline: "The signature FHI look" },
+  { id: "executive", name: "Executive Gold", tagline: "Dark, bold & luxurious" },
+  { id: "platinum",  name: "Platinum Light", tagline: "Clean, bright & modern" },
+]
+
+const DESIGN_STORAGE_KEY = "fhi-bc-design"
+
+function isDesignId(v: string | null): v is DesignId {
+  return v === "classic" || v === "executive" || v === "platinum"
+}
 
 // ── Phone helpers ────────────────────────────────────────────────────────────
 /** Strip any leading 0 from the local number (digits only). */
@@ -43,22 +70,37 @@ function formatDisplay(dial: string, local: string): string {
 function isPhoneOk(local: string) { return local.length >= 4 }
 function toE164(dial: string, local: string) { return `${dial}${local}` }
 
-// ── Image loader ─────────────────────────────────────────────────────────────
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return "FG"
+  const first = parts[0][0] ?? ""
+  const last  = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : ""
+  return (first + last).toUpperCase()
+}
+
+// ── Image loader (cached) ────────────────────────────────────────────────────
+const imgCache = new Map<string, Promise<HTMLImageElement>>()
+
 function loadImg(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+  const cached = imgCache.get(src)
+  if (cached) return cached
+  const p = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new window.Image()
     img.crossOrigin = "anonymous"
+    img.referrerPolicy = "no-referrer"
     img.onload  = () => resolve(img)
-    img.onerror = reject
+    img.onerror = () => { imgCache.delete(src); reject(new Error(`Failed to load ${src}`)) }
     img.src     = src
   })
+  imgCache.set(src, p)
+  return p
 }
 
 // ── Canvas icon drawing ───────────────────────────────────────────────────────
-function drawPhoneIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
+function drawPhoneIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, color = GOLD) {
   const s = size
   ctx.save()
-  ctx.strokeStyle = "#ca9104"
+  ctx.strokeStyle = color
   ctx.lineWidth   = s * 0.12
   ctx.lineCap     = "round"
   ctx.lineJoin    = "round"
@@ -68,15 +110,15 @@ function drawPhoneIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, si
   ctx.stroke()
   ctx.beginPath()
   ctx.arc(cx, cy - s * 0.25, s * 0.1, 0, Math.PI * 2)
-  ctx.fillStyle = "#ca9104"
+  ctx.fillStyle = color
   ctx.fill()
   ctx.restore()
 }
 
-function drawMailIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) {
+function drawMailIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number, color = GOLD) {
   const s = size
   ctx.save()
-  ctx.strokeStyle = "#ca9104"
+  ctx.strokeStyle = color
   ctx.lineWidth   = s * 0.1
   ctx.lineCap     = "round"
   ctx.lineJoin    = "round"
@@ -92,11 +134,449 @@ function drawMailIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, siz
   ctx.restore()
 }
 
-// ── Canvas renderer ───────────────────────────────────────────────────────────
-interface CardData { name: string; phoneDial: string; phoneLocal: string; email: string }
+// ── Shared drawing helpers ────────────────────────────────────────────────────
+function drawAvatarCircle(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement | null,
+  initials: string,
+  cx: number, cy: number, r: number,
+  opts: { ring: string; ringW: number; bg: string; fg: string; doubleRing?: boolean },
+) {
+  ctx.save()
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.fillStyle = opts.bg
+  ctx.fill()
 
+  if (img) {
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.clip()
+    // cover-fit into the circle
+    const scale = Math.max((r * 2) / img.width, (r * 2) / img.height)
+    const dw = img.width * scale, dh = img.height * scale
+    ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh)
+    ctx.restore()
+  } else {
+    ctx.fillStyle = opts.fg
+    ctx.font = `700 ${Math.round(r * 0.72)}px ${FONT_STACK}`
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+    ctx.fillText(initials, cx, cy + r * 0.04)
+  }
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.strokeStyle = opts.ring
+  ctx.lineWidth   = opts.ringW
+  ctx.stroke()
+
+  if (opts.doubleRing) {
+    ctx.beginPath()
+    ctx.arc(cx, cy, r + opts.ringW * 2.4, 0, Math.PI * 2)
+    ctx.strokeStyle = opts.ring
+    ctx.lineWidth   = Math.max(1, opts.ringW * 0.4)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function drawLogoCentered(ctx: CanvasRenderingContext2D, img: HTMLImageElement, cx: number, topY: number, targetH: number) {
+  const ratio = img.width / img.height
+  const w = targetH * ratio
+  ctx.drawImage(img, cx - w / 2, topY, w, targetH)
+}
+
+function drawLogoAt(ctx: CanvasRenderingContext2D, img: HTMLImageElement, x: number, y: number, targetH: number) {
+  const ratio = img.width / img.height
+  ctx.drawImage(img, x, y, targetH * ratio, targetH)
+}
+
+/** line — diamond — line ornament, centered on (cx, cy) */
+function drawOrnament(ctx: CanvasRenderingContext2D, cx: number, cy: number, totalW: number, color: string) {
+  const dia = totalW * 0.045
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.fillStyle   = color
+  ctx.lineWidth   = Math.max(1, dia * 0.18)
+  ctx.beginPath()
+  ctx.moveTo(cx - totalW / 2, cy)
+  ctx.lineTo(cx - dia * 1.6, cy)
+  ctx.moveTo(cx + dia * 1.6, cy)
+  ctx.lineTo(cx + totalW / 2, cy)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(cx, cy - dia)
+  ctx.lineTo(cx + dia, cy)
+  ctx.lineTo(cx, cy + dia)
+  ctx.lineTo(cx - dia, cy)
+  ctx.closePath()
+  ctx.fill()
+  ctx.restore()
+}
+
+type Ctx2D = CanvasRenderingContext2D & { letterSpacing?: string }
+
+function setLetterSpacing(ctx: Ctx2D, px: number) {
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${px}px`
+}
+
+interface CardData {
+  name: string
+  phoneDial: string
+  phoneLocal: string
+  email: string
+  avatarUrl: string | null
+}
+
+interface BlockOpts {
+  x: number
+  maxW: number
+  nameY: number
+  nameColor: string
+  titleColor: string
+  textColor: string
+  dividerColor: string
+  iconColor: string
+}
+
+/** Name + title + divider + contact rows — shared by every design. */
+function drawContactBlock(ctx: Ctx2D, data: CardData, w: number, h: number, o: BlockOpts) {
+  ctx.textAlign    = "left"
+  ctx.textBaseline = "alphabetic"
+
+  // Name — auto-shrink until it fits
+  const nameTxt = (data.name || "Your Name").toUpperCase()
+  let fontSize = Math.round(h * 0.095)
+  ctx.font = `700 ${fontSize}px ${FONT_STACK}`
+  while (ctx.measureText(nameTxt).width > o.maxW && fontSize > 20) {
+    fontSize -= 2
+    ctx.font = `700 ${fontSize}px ${FONT_STACK}`
+  }
+  ctx.fillStyle = o.nameColor
+  ctx.fillText(nameTxt, o.x, o.nameY)
+
+  // Title — letter-spaced, auto-shrink
+  let subSize = Math.round(h * 0.040)
+  ctx.font = `600 ${subSize}px ${FONT_STACK}`
+  setLetterSpacing(ctx, subSize * 0.14)
+  while (ctx.measureText(TITLE_TEXT).width > o.maxW && subSize > 10) {
+    subSize -= 1
+    ctx.font = `600 ${subSize}px ${FONT_STACK}`
+    setLetterSpacing(ctx, subSize * 0.14)
+  }
+  ctx.fillStyle = o.titleColor
+  const titleY = o.nameY + h * 0.095
+  ctx.fillText(TITLE_TEXT, o.x, titleY)
+  setLetterSpacing(ctx, 0)
+
+  // Divider
+  const divY = titleY + h * 0.055
+  ctx.strokeStyle = o.dividerColor
+  ctx.lineWidth   = Math.max(1, h * 0.004)
+  ctx.beginPath()
+  ctx.moveTo(o.x, divY)
+  ctx.lineTo(o.x + o.maxW, divY)
+  ctx.stroke()
+
+  // Contact rows
+  const rowSize   = Math.round(h * 0.046)
+  const iconSize  = rowSize * 1.1
+  const row1Y     = divY + h * 0.105
+  const row2Y     = row1Y + h * 0.088
+  const txtStartX = o.x + iconSize * 1.4
+
+  ctx.font = `400 ${rowSize}px ${FONT_STACK}`
+  ctx.fillStyle    = o.textColor
+  ctx.textBaseline = "middle"
+
+  drawPhoneIcon(ctx, o.x + iconSize * 0.5, row1Y, iconSize, o.iconColor)
+  ctx.fillText(
+    data.phoneLocal ? formatDisplay(data.phoneDial, data.phoneLocal) : "+971 5x xxx xxxx",
+    txtStartX, row1Y,
+  )
+
+  drawMailIcon(ctx, o.x + iconSize * 0.5, row2Y, iconSize, o.iconColor)
+  ctx.font = `400 ${rowSize}px ${FONT_STACK}`
+  ctx.fillText(data.email || "your@email.com", txtStartX, row2Y)
+}
+
+/**
+ * Remote avatar hosts (S3, Google) rarely send CORS headers, which taints the
+ * canvas. Routing through Next's same-origin image optimizer avoids CORS
+ * entirely — the host just needs to be in next.config images.remotePatterns.
+ * w/q must be values allowed by the images config (imageSizes / qualities).
+ *
+ * The fetch pins Accept to JPEG: letting the browser negotiate can select
+ * WebP, whose encoder 500s in some sharp/Windows setups, while JPEG output
+ * is a plain resize that always works. The bytes go to <img> via a
+ * same-origin object URL, so the canvas is never tainted.
+ */
+function optimizerUrl(src: string): string {
+  return `/_next/image?url=${encodeURIComponent(src)}&w=800&q=80`
+}
+
+async function loadViaOptimizer(src: string): Promise<HTMLImageElement> {
+  const res = await fetch(optimizerUrl(src), { headers: { Accept: "image/jpeg" } })
+  if (!res.ok) throw new Error(`optimizer ${res.status}`)
+  const blob = await res.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    return await loadImg(objectUrl)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+const avatarCache = new Map<string, Promise<HTMLImageElement | null>>()
+
+function loadAvatar(data: CardData): Promise<HTMLImageElement | null> {
+  const src = data.avatarUrl
+  if (!src) return Promise.resolve(null)
+  const cached = avatarCache.get(src)
+  if (cached) return cached
+  const p = (async () => {
+    const isRemote =
+      /^https?:\/\//i.test(src) &&
+      (typeof window === "undefined" || !src.startsWith(window.location.origin))
+    if (isRemote) {
+      try { return await loadViaOptimizer(src) } catch { /* fall back to direct */ }
+    }
+    try { return await loadImg(src) } catch { return null }
+  })()
+  avatarCache.set(src, p)
+  // drop failed loads from the cache so a later render can retry
+  p.then((img) => { if (!img) avatarCache.delete(src) })
+  return p
+}
+
+// ── Design: Classic Navy (original artwork + avatar) ─────────────────────────
+async function drawClassicFront(ctx: Ctx2D, data: CardData, w: number, h: number) {
+  try {
+    const img = await loadImg(FRONT_URL)
+    ctx.drawImage(img, 0, 0, w, h)
+  } catch {
+    const g = ctx.createLinearGradient(0, 0, w, h)
+    g.addColorStop(0, NAVY_DEEP)
+    g.addColorStop(1, NAVY)
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, w, h)
+  }
+
+  const avatarImg = await loadAvatar(data)
+  drawAvatarCircle(ctx, avatarImg, initialsOf(data.name), w * 0.185, h * 0.615, h * 0.20, {
+    ring: GOLD_LIGHT, ringW: h * 0.010, bg: "#0a2a4d", fg: GOLD_LIGHT,
+  })
+
+  drawContactBlock(ctx, data, w, h, {
+    x: w * 0.40, maxW: w * 0.54, nameY: h * 0.40,
+    nameColor: "#ffffff", titleColor: GOLD_LIGHT, textColor: "#ffffff",
+    dividerColor: "rgba(255,255,255,0.25)", iconColor: GOLD,
+  })
+}
+
+async function drawClassicBack(ctx: Ctx2D, w: number, h: number) {
+  try {
+    const img = await loadImg(BACK_URL)
+    ctx.drawImage(img, 0, 0, w, h)
+  } catch {
+    ctx.fillStyle = NAVY
+    ctx.fillRect(0, 0, w, h)
+  }
+}
+
+// ── Design: Executive Gold (fully drawn, dark luxury) ────────────────────────
+function paintExecutiveBg(ctx: Ctx2D, w: number, h: number) {
+  const g = ctx.createLinearGradient(0, 0, w, h)
+  g.addColorStop(0,    "#00152b")
+  g.addColorStop(0.55, NAVY)
+  g.addColorStop(1,    "#003158")
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, w, h)
+
+  // soft gold glow, upper-left
+  const rg = ctx.createRadialGradient(w * 0.17, h * 0.40, 0, w * 0.17, h * 0.40, h * 0.65)
+  rg.addColorStop(0, "rgba(214,179,87,0.12)")
+  rg.addColorStop(1, "rgba(214,179,87,0)")
+  ctx.fillStyle = rg
+  ctx.fillRect(0, 0, w, h)
+
+  // diagonal gold accent lines, top-right
+  ctx.save()
+  ctx.strokeStyle = "rgba(214,179,87,0.30)"
+  ctx.lineWidth = Math.max(1, h * 0.004)
+  for (let i = 0; i < 3; i++) {
+    const off = i * w * 0.035
+    ctx.beginPath()
+    ctx.moveTo(w * 0.76 + off, -h * 0.05)
+    ctx.lineTo(w * 1.04 + off, h * 0.26)
+    ctx.stroke()
+  }
+  ctx.restore()
+}
+
+async function drawExecutiveFront(ctx: Ctx2D, data: CardData, w: number, h: number) {
+  paintExecutiveBg(ctx, w, h)
+
+  // vertical gold divider between photo column and text column
+  const divGrad = ctx.createLinearGradient(0, h * 0.16, 0, h * 0.84)
+  divGrad.addColorStop(0, "rgba(214,179,87,0)")
+  divGrad.addColorStop(0.5, "rgba(214,179,87,0.55)")
+  divGrad.addColorStop(1, "rgba(214,179,87,0)")
+  ctx.strokeStyle = divGrad
+  ctx.lineWidth = Math.max(1, h * 0.004)
+  ctx.beginPath()
+  ctx.moveTo(w * 0.335, h * 0.16)
+  ctx.lineTo(w * 0.335, h * 0.84)
+  ctx.stroke()
+
+  const avatarImg = await loadAvatar(data)
+  drawAvatarCircle(ctx, avatarImg, initialsOf(data.name), w * 0.17, h * 0.40, h * 0.185, {
+    ring: GOLD_LIGHT, ringW: h * 0.010, bg: "#0a2a4d", fg: GOLD_LIGHT, doubleRing: true,
+  })
+
+  try {
+    const logo = await loadImg(LOGO_WHITE)
+    drawLogoCentered(ctx, logo, w * 0.17, h * 0.68, h * 0.13)
+  } catch { /* logo optional */ }
+
+  drawContactBlock(ctx, data, w, h, {
+    x: w * 0.40, maxW: w * 0.53, nameY: h * 0.37,
+    nameColor: "#ffffff", titleColor: GOLD_LIGHT, textColor: "#dbe4f0",
+    dividerColor: "rgba(214,179,87,0.35)", iconColor: GOLD_LIGHT,
+  })
+
+  // corner tick, bottom-right
+  ctx.strokeStyle = "rgba(214,179,87,0.6)"
+  ctx.lineWidth = Math.max(1, h * 0.006)
+  ctx.beginPath()
+  ctx.moveTo(w * 0.955, h * 0.86)
+  ctx.lineTo(w * 0.955, h * 0.92)
+  ctx.lineTo(w * 0.915, h * 0.92)
+  ctx.stroke()
+}
+
+async function drawExecutiveBack(ctx: Ctx2D, w: number, h: number) {
+  paintExecutiveBg(ctx, w, h)
+
+  // inset gold frame
+  ctx.strokeStyle = "rgba(214,179,87,0.55)"
+  ctx.lineWidth = Math.max(1, h * 0.006)
+  ctx.strokeRect(w * 0.045, h * 0.078, w * 0.91, h * 0.844)
+
+  try {
+    const logo = await loadImg(LOGO_WHITE)
+    drawLogoCentered(ctx, logo, w / 2, h * 0.30, h * 0.22)
+  } catch { /* logo optional */ }
+
+  drawOrnament(ctx, w / 2, h * 0.62, w * 0.22, GOLD_LIGHT)
+
+  ctx.font = `500 ${Math.round(h * 0.045)}px ${FONT_STACK}`
+  setLetterSpacing(ctx, h * 0.006)
+  ctx.fillStyle = "#dbe4f0"
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.fillText(SITE_TEXT, w / 2, h * 0.71)
+  setLetterSpacing(ctx, 0)
+}
+
+// ── Design: Platinum Light (fully drawn, clean & bright) ─────────────────────
+async function drawPlatinumFront(ctx: Ctx2D, data: CardData, w: number, h: number) {
+  // background
+  const g = ctx.createLinearGradient(0, 0, 0, h)
+  g.addColorStop(0, "#ffffff")
+  g.addColorStop(1, "#f6f7f9")
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, w, h)
+
+  // navy diagonal panel, right side
+  ctx.beginPath()
+  ctx.moveTo(w * 0.70, 0)
+  ctx.lineTo(w, 0)
+  ctx.lineTo(w, h)
+  ctx.lineTo(w * 0.79, h)
+  ctx.closePath()
+  const pg = ctx.createLinearGradient(w * 0.70, 0, w, h)
+  pg.addColorStop(0, NAVY)
+  pg.addColorStop(1, NAVY_DEEP)
+  ctx.fillStyle = pg
+  ctx.fill()
+
+  // gold edge along the diagonal
+  ctx.beginPath()
+  ctx.moveTo(w * 0.688, 0)
+  ctx.lineTo(w * 0.70, 0)
+  ctx.lineTo(w * 0.79, h)
+  ctx.lineTo(w * 0.778, h)
+  ctx.closePath()
+  ctx.fillStyle = GOLD
+  ctx.fill()
+
+  const avatarImg = await loadAvatar(data)
+  drawAvatarCircle(ctx, avatarImg, initialsOf(data.name), w * 0.865, h * 0.48, h * 0.19, {
+    ring: GOLD_LIGHT, ringW: h * 0.011, bg: "#0a2a4d", fg: GOLD_LIGHT,
+  })
+
+  try {
+    const logo = await loadImg(LOGO_DARK)
+    drawLogoAt(ctx, logo, w * 0.06, h * 0.09, h * 0.15)
+  } catch { /* logo optional */ }
+
+  drawContactBlock(ctx, data, w, h, {
+    x: w * 0.06, maxW: w * 0.56, nameY: h * 0.47,
+    nameColor: NAVY, titleColor: "#a87b06", textColor: "#374151",
+    dividerColor: "#e2e5ea", iconColor: GOLD,
+  })
+
+  // gold baseline bar, bottom-left
+  ctx.fillStyle = GOLD
+  ctx.fillRect(w * 0.06, h * 0.90, w * 0.14, h * 0.012)
+}
+
+async function drawPlatinumBack(ctx: Ctx2D, w: number, h: number) {
+  ctx.fillStyle = "#ffffff"
+  ctx.fillRect(0, 0, w, h)
+
+  // corner accents echoing the front
+  ctx.fillStyle = NAVY
+  ctx.beginPath()
+  ctx.moveTo(0, 0); ctx.lineTo(w * 0.16, 0); ctx.lineTo(0, h * 0.28); ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = GOLD
+  ctx.beginPath()
+  ctx.moveTo(w * 0.16, 0); ctx.lineTo(w * 0.185, 0); ctx.lineTo(0, h * 0.325); ctx.lineTo(0, h * 0.28); ctx.closePath()
+  ctx.fill()
+
+  ctx.fillStyle = NAVY
+  ctx.beginPath()
+  ctx.moveTo(w, h); ctx.lineTo(w * 0.84, h); ctx.lineTo(w, h * 0.72); ctx.closePath()
+  ctx.fill()
+  ctx.fillStyle = GOLD
+  ctx.beginPath()
+  ctx.moveTo(w * 0.84, h); ctx.lineTo(w * 0.815, h); ctx.lineTo(w, h * 0.675); ctx.lineTo(w, h * 0.72); ctx.closePath()
+  ctx.fill()
+
+  try {
+    const logo = await loadImg(LOGO_DARK)
+    drawLogoCentered(ctx, logo, w / 2, h * 0.30, h * 0.22)
+  } catch { /* logo optional */ }
+
+  drawOrnament(ctx, w / 2, h * 0.62, w * 0.22, GOLD)
+
+  ctx.font = `500 ${Math.round(h * 0.045)}px ${FONT_STACK}`
+  setLetterSpacing(ctx, h * 0.006)
+  ctx.fillStyle = NAVY
+  ctx.textAlign = "center"
+  ctx.textBaseline = "middle"
+  ctx.fillText(SITE_TEXT, w / 2, h * 0.71)
+  setLetterSpacing(ctx, 0)
+}
+
+// ── Canvas renderer ───────────────────────────────────────────────────────────
 async function renderCard(
   side: "front" | "back",
+  design: DesignId,
   data: CardData,
   width: number,
   height: number,
@@ -104,74 +584,20 @@ async function renderCard(
   const canvas = document.createElement("canvas")
   canvas.width  = width
   canvas.height = height
-  const ctx = canvas.getContext("2d")!
+  const ctx = canvas.getContext("2d")! as Ctx2D
 
-  // background image
-  const src = side === "front" ? FRONT_URL : BACK_URL
-  try {
-    const img = await loadImg(src)
-    ctx.drawImage(img, 0, 0, width, height)
-  } catch {
-    // fallback: solid navy background if image fails
-    ctx.fillStyle = "#001f3f"
-    ctx.fillRect(0, 0, width, height)
+  try { await document.fonts.ready } catch { /* draw with fallback font */ }
+
+  if (design === "classic") {
+    if (side === "front") await drawClassicFront(ctx, data, width, height)
+    else                  await drawClassicBack(ctx, width, height)
+  } else if (design === "executive") {
+    if (side === "front") await drawExecutiveFront(ctx, data, width, height)
+    else                  await drawExecutiveBack(ctx, width, height)
+  } else {
+    if (side === "front") await drawPlatinumFront(ctx, data, width, height)
+    else                  await drawPlatinumBack(ctx, width, height)
   }
-
-  if (side === "back") return canvas.toDataURL("image/png")
-
-  // ── Front overlay ────────────────────────────────────────────────────────
-  // Text region sits in the right ~55% of the card (typical business card layout)
-  const textX = width * 0.40
-  const maxW  = width * 0.54
-
-  // Name – auto-shrink until it fits
-  ctx.fillStyle = "#ffffff"
-  ctx.textAlign  = "left"
-  ctx.textBaseline = "alphabetic"
-  let fontSize = Math.round(height * 0.10)
-  ctx.font = `700 ${fontSize}px 'Arial', sans-serif`
-  while (ctx.measureText(data.name || "Your Name").width > maxW && fontSize > 24) {
-    fontSize -= 2
-    ctx.font = `700 ${fontSize}px 'Arial', sans-serif`
-  }
-  ctx.fillText(data.name || "Your Name", textX, height * 0.44)
-
-  // Subtitle
-  const subSize = Math.round(height * 0.055)
-  ctx.font = `400 ${subSize}px 'Arial', sans-serif`
-  ctx.fillStyle = "#ca9104"
-  ctx.fillText("Global Partner Dubai", textX, height * 0.44 + fontSize * 1.25)
-
-  // Divider
-  const divY = height * 0.44 + fontSize * 1.25 + subSize * 0.9
-  ctx.strokeStyle = "rgba(255,255,255,0.25)"
-  ctx.lineWidth   = 1
-  ctx.beginPath()
-  ctx.moveTo(textX, divY)
-  ctx.lineTo(textX + maxW, divY)
-  ctx.stroke()
-
-  // Contact rows
-  const rowSize   = Math.round(height * 0.046)
-  const iconSize  = rowSize * 1.1
-  const row1Y     = divY + height * 0.12
-  const row2Y     = row1Y + height * 0.09
-  const iconX     = textX
-  const txtStartX = textX + iconSize * 1.4
-
-  ctx.font = `400 ${rowSize}px 'Arial', sans-serif`
-  ctx.fillStyle    = "#ffffff"
-  ctx.textBaseline = "middle"
-
-  // Phone row
-  drawPhoneIcon(ctx, iconX + iconSize * 0.5, row1Y, iconSize)
-  ctx.fillText(data.phoneLocal ? formatDisplay(data.phoneDial, data.phoneLocal) : "+971 5x xxx xxxx", txtStartX, row1Y)
-
-  // Email row
-  drawMailIcon(ctx, iconX + iconSize * 0.5, row2Y, iconSize)
-  const emailTxt = data.email || "your@email.com"
-  ctx.font = `400 ${rowSize}px 'Arial', sans-serif`
-  ctx.fillText(emailTxt, txtStartX, row2Y)
 
   return canvas.toDataURL("image/png")
 }
@@ -180,32 +606,45 @@ async function renderCard(
 // Display canvas is 700×400 rendered at devicePixelRatio for crispness
 const DISP_W = 700
 const DISP_H = 400
+const THUMB_W = 315
+const THUMB_H = 180
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function BusinessCardPage() {
   const router = useRouter()
   const { user, profile } = useAuth()
-  const role = (profile?.role ?? "agent") as string
 
-  const fullName = profile?.fullname ?? user?.email?.split("@")[0] ?? ""
+  const fullName  = profile?.fullname ?? user?.email?.split("@")[0] ?? ""
+  const avatarUrl = profile?.profile_url ?? null
 
   // phone/email state
   const [countryCode, setCountryCode] = useState("+971") // country-code value (e.g. "+63")
   const [localNumber, setLocalNumber] = useState("")     // local number digits
   const [email,       setEmail]       = useState("")
 
-  // card side
+  // card side + design (design choice restored from this device's last pick)
   const [flipped, setFlipped] = useState(false)
+  const [design,  setDesign]  = useState<DesignId>(() => {
+    if (typeof window === "undefined") return "classic"
+    const saved = localStorage.getItem(DESIGN_STORAGE_KEY)
+    return isDesignId(saved) ? saved : "classic"
+  })
 
   // canvas preview data URLs
   const [frontDataUrl, setFrontDataUrl] = useState("")
   const [backDataUrl,  setBackDataUrl]  = useState("")
+  const [thumbs, setThumbs] = useState<Record<DesignId, string>>({ classic: "", executive: "", platinum: "" })
   const [previewLoading, setPreviewLoading] = useState(false)
 
   // save state
   type SaveState = "idle" | "saving" | "success" | "error"
   const [saveState, setSaveState]   = useState<SaveState>("idle")
   const [saveError, setSaveError]   = useState("")
+
+  const chooseDesign = (id: DesignId) => {
+    setDesign(id)
+    try { localStorage.setItem(DESIGN_STORAGE_KEY, id) } catch { /* private mode */ }
+  }
 
   // pre-fill from profile on mount
   useEffect(() => {
@@ -234,15 +673,17 @@ export default function BusinessCardPage() {
   // ── regenerate canvas preview ────────────────────────────────────────────
   const regeneratePreview = useCallback(async () => {
     setPreviewLoading(true)
-    const data: CardData = { name: fullName, phoneDial, phoneLocal: localNumber, email }
-    const [f, b] = await Promise.all([
-      renderCard("front", data, DISP_W, DISP_H),
-      renderCard("back",  data, DISP_W, DISP_H),
+    const data: CardData = { name: fullName, phoneDial, phoneLocal: localNumber, email, avatarUrl }
+    const [f, b, ...t] = await Promise.all([
+      renderCard("front", design, data, DISP_W, DISP_H),
+      renderCard("back",  design, data, DISP_W, DISP_H),
+      ...DESIGNS.map((d) => renderCard("front", d.id, data, THUMB_W, THUMB_H)),
     ])
     setFrontDataUrl(f)
     setBackDataUrl(b)
+    setThumbs({ classic: t[0], executive: t[1], platinum: t[2] })
     setPreviewLoading(false)
-  }, [fullName, phoneDial, localNumber, email])
+  }, [fullName, phoneDial, localNumber, email, avatarUrl, design])
 
   // regenerate whenever inputs change (debounced 400ms)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -255,8 +696,8 @@ export default function BusinessCardPage() {
   // ── download ─────────────────────────────────────────────────────────────
   const download = async (side: "front" | "back") => {
     const safeName = fullName.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9-]/g, "")
-    const filename  = `business-card-${side}-${safeName}-${EXPORT_W}x${EXPORT_H}.png`
-    const url = await renderCard(side, { name: fullName, phoneDial, phoneLocal: localNumber, email }, EXPORT_W, EXPORT_H)
+    const filename  = `business-card-${design}-${side}-${safeName}-${EXPORT_W}x${EXPORT_H}.png`
+    const url = await renderCard(side, design, { name: fullName, phoneDial, phoneLocal: localNumber, email, avatarUrl }, EXPORT_W, EXPORT_H)
     const a = document.createElement("a")
     a.href     = url
     a.download = filename
@@ -305,8 +746,6 @@ export default function BusinessCardPage() {
     return `${inputBase} ${inputIdle}`
   }
 
-  const shownCard = flipped ? backDataUrl : frontDataUrl
-
   return (
     <>
       {/* ── Page header ─────────────────────────────────────────────────── */}
@@ -317,7 +756,7 @@ export default function BusinessCardPage() {
           </div>
           <div>
             <h1 className="font-['Outfit'] text-xl font-bold text-[#0d1117]">My Business Card</h1>
-            <p className="text-sm text-[#9ca3af]">Edit your contact details and download your personalised card</p>
+            <p className="text-sm text-[#9ca3af]">Pick a design, edit your contact details and download your personalised card</p>
           </div>
         </div>
       </div>
@@ -443,17 +882,65 @@ export default function BusinessCardPage() {
             <div className="space-y-1.5">
               <p className="text-sm font-semibold text-[#374151]">Tips</p>
               <ul className="text-xs text-[#6b7280] space-y-1 list-disc list-inside">
+                <li>Choose from 3 card designs — your pick is remembered on this device.</li>
+                <li>Your profile photo appears on the card; update it in Profile settings.</li>
                 <li>Click the card on the right to flip it and preview the back.</li>
                 <li>The preview updates live as you type — no need to save first.</li>
                 <li>Downloads are exported at 2100 × 1200 px (print quality).</li>
-                <li>Save your contact details so they're available across devices.</li>
               </ul>
             </div>
           </div>
         </div>
 
-        {/* ══ RIGHT – Card preview ═════════════════════════════════════════ */}
+        {/* ══ RIGHT – Design picker + card preview ═════════════════════════ */}
         <div className="space-y-5">
+
+          {/* Design picker */}
+          <div className="bg-white rounded-2xl border border-[#e4e7ec] shadow-[0_2px_16px_-4px_rgba(0,31,63,0.08)] px-6 py-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Palette className="w-4 h-4 text-[#d6b357]" />
+              <div>
+                <h2 className="font-['Outfit'] text-base font-bold text-[#0d1117]">Choose Your Design</h2>
+                <p className="text-xs text-[#9ca3af]">The preview and downloads use the design you select</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              {DESIGNS.map((d) => {
+                const selected = design === d.id
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => chooseDesign(d.id)}
+                    aria-pressed={selected}
+                    className={`relative rounded-xl p-1.5 text-left transition-all duration-200 ${
+                      selected
+                        ? "border-2 border-[#d6b357] bg-[#fffdf3] shadow-[0_4px_16px_-4px_rgba(214,179,87,0.5)]"
+                        : "border border-[#e4e7ec] bg-white hover:border-[#c4cbd8] hover:shadow-sm"
+                    }`}
+                  >
+                    {selected && (
+                      <span className="absolute -top-2 -right-2 z-10 bg-[#d6b357] rounded-full p-0.5 shadow">
+                        <CheckCircle2 className="w-4 h-4 text-white" />
+                      </span>
+                    )}
+                    <div className="aspect-[1.75/1] rounded-lg overflow-hidden bg-[#001f3f] flex items-center justify-center">
+                      {thumbs[d.id] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={thumbs[d.id]} alt={`${d.name} design preview`} className="w-full h-full object-cover" />
+                      ) : (
+                        <Loader2 className="w-4 h-4 text-[#d6b357] animate-spin" />
+                      )}
+                    </div>
+                    <div className="pt-1.5 px-1 pb-0.5">
+                      <p className={`text-xs font-bold ${selected ? "text-[#8a6a03]" : "text-[#374151]"}`}>{d.name}</p>
+                      <p className="text-[10px] text-[#9ca3af]">{d.tagline}</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
           {/* Flip container */}
           <div className="bg-white rounded-2xl border border-[#e4e7ec] shadow-[0_2px_16px_-4px_rgba(0,31,63,0.08)] overflow-hidden">
@@ -462,7 +949,9 @@ export default function BusinessCardPage() {
                 <h2 className="font-['Outfit'] text-base font-bold text-[#0d1117]">
                   Card Preview — {flipped ? "Back" : "Front"}
                 </h2>
-                <p className="text-xs text-[#9ca3af] mt-0.5">Click the card or press Flip to see the other side</p>
+                <p className="text-xs text-[#9ca3af] mt-0.5">
+                  {DESIGNS.find((d) => d.id === design)?.name} · Click the card or press Flip to see the other side
+                </p>
               </div>
               <button
                 onClick={() => setFlipped(f => !f)}
