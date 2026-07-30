@@ -8,6 +8,7 @@ import { Upload, X, Check, ImageIcon, Trash2, ZoomIn, ZoomOut, ArrowLeft, Crop }
 import Image from "next/image"
 import { updateDeveloperLogoUrl } from "@/lib/developer-service"
 import { getCroppedBlob } from "@/lib/crop-image"
+import { compressImageForUpload } from "@/lib/upload/compress-image"
 
 function Portal({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false)
@@ -140,8 +141,15 @@ export function DeveloperLogoUpload({
         return
       }
 
+      // Shrink in the browser before it goes over the wire — see
+      // lib/upload/compress-image.ts. Fails open, so a logo still uploads
+      // (just uncompressed) if the browser can't do it.
+      const { file: toUpload } = await compressImageForUpload(
+        new File([blob], "logo.png", { type: blob.type || "image/png" }),
+      )
+
       const fd = new FormData()
-      fd.append("file", blob, "logo.png")
+      fd.append("file", toUpload, toUpload.name)
       fd.append("developerSlug", developerSlug)
 
       const res = await fetch("/api/upload/developer", { method: "POST", body: fd })
@@ -187,7 +195,7 @@ export function DeveloperLogoUpload({
           {/* Header */}
           <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-[#f0f0f0]">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#001f3f] to-[#d6b357] flex items-center justify-center">
+              <div className="w-10 h-10 rounded-2xl bg-[#001f3f] flex items-center justify-center">
                 <ImageIcon className="w-5 h-5 text-white" />
               </div>
               <div>
@@ -335,7 +343,7 @@ export function DeveloperLogoUpload({
 
                 <p className="text-[11px] text-[#9ca3af] font-mono px-1">
                   Path: FHI_GLOBAL / {developerSlug} / [timestamp]-logo.png
-                  {deferred && " · uploads when the developer is added"}
+                  {deferred && " · uploads when the developer is saved"}
                 </p>
               </>
             )}
@@ -363,7 +371,7 @@ export function DeveloperLogoUpload({
               </button>
               {imageSrc && (
                 <button type="button" onClick={() => void handleUpload()} disabled={busy || !croppedAreaPixels}
-                  className="bg-gradient-to-r from-[#001f3f] to-[#d6b357] text-white px-6 py-2.5 rounded-full font-semibold text-sm transition-all duration-300 hover:translate-y-[-1px] hover:shadow-lg shadow-md disabled:opacity-50 disabled:translate-y-0 flex items-center gap-2">
+                  className="bg-[#001f3f] hover:bg-[#002b57] text-white px-6 py-2.5 rounded-full font-semibold text-sm transition-all duration-300 hover:translate-y-[-1px] hover:shadow-lg shadow-md disabled:opacity-50 disabled:translate-y-0 flex items-center gap-2">
                   {busy
                     ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> {deferred ? "Cropping…" : "Uploading…"}</>
                     : <><Check className="w-4 h-4" /> {deferred ? "Crop & Attach" : "Crop & Upload"}</>
