@@ -32,6 +32,7 @@ import {
   fetchDevelopersForSale,
   fetchAgentsForSale,
   updateSaleValidationStatus,
+  notifySaleEvent,
   deleteSale,
   isAdminRole,
   type SaleRecord,
@@ -413,9 +414,11 @@ export function SalesTable({
 
   const handleValidationShortcut = async (sale: SaleRecord, nextStatus: ValidationStatus) => {
     if (!isAdminUser) return
-    const { data, error } = await updateSaleValidationStatus(sale.id, nextStatus, currentUserId, currentRole)
+    const { data, error, previousStatus } = await updateSaleValidationStatus(sale.id, nextStatus, currentUserId, currentRole)
     if (error) { addToast("error", error); return }
     setSales((prev) => prev.map((item) => (item.id === sale.id ? data! : item)))
+    // Email the agent when an admin actually changes the validation status.
+    if (previousStatus !== nextStatus) notifySaleEvent(sale.id, "validation")
     addToast("success", `Validation set to ${STATUS_LABEL[nextStatus]}`)
     void loadSummaries() // pending-validation count changed
   }
