@@ -144,6 +144,17 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) + " AED"
 }
 
+/**
+ * Title-case a person / entity name so mixed-casing source data
+ * (e.g. "MICHELLE QUINTO GUINTO") renders uniformly as "Michelle Quinto Guinto".
+ * Capitalises the first letter of every word, including after hyphens and
+ * apostrophes (O'Brien, Jean-Paul). Returns "" for blank input.
+ */
+function toTitleCase(value: string | null | undefined) {
+  if (!value) return ""
+  return value.toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase())
+}
+
 function StatusBadge({ value, type }: { value: string; type: "commission" | "validation" }) {
   const colors: Record<string, string> = {
     // commission statuses
@@ -467,11 +478,11 @@ export function SalesTable({
   // (an agent's own rows would all read the same name). Built once per render.
   const columns: Col[] = []
   if (isAdminUser) {
-    columns.push({ key: "agent", header: "Agent", tdClassName: "font-semibold text-[#0d1117]", cell: (s) => s.profiles?.fullname ?? "—" })
+    columns.push({ key: "agent", header: "Agent", tdClassName: "font-semibold text-[#0d1117]", cell: (s) => toTitleCase(s.profiles?.fullname) || "—" })
   }
   if (activeTab === "project") {
-    columns.push({ key: "developer", header: "Developer", tdClassName: "text-[#374151]", cell: (s) => s.developers?.name ?? "—" })
-    columns.push({ key: "project", header: "Project", tdClassName: "text-[#374151]", cell: (s) => s.projects?.name ?? "—" })
+    columns.push({ key: "developer", header: "Developer", tdClassName: "text-[#374151]", cell: (s) => toTitleCase(s.developers?.name) || "—" })
+    columns.push({ key: "project", header: "Project", tdClassName: "text-[#374151]", cell: (s) => toTitleCase(s.projects?.name) || "—" })
     columns.push({
       key: "unit", header: "Unit", tdClassName: "text-xs text-[#6b7280]",
       cell: (s) => s.unit_number
@@ -482,7 +493,7 @@ export function SalesTable({
     columns.push({ key: "ptype", header: "Property Type", tdClassName: "text-[#374151]", cell: (s) => s.property_type ?? "—" })
     columns.push({ key: "paddr", header: "Property Address", tdClassName: "text-[#374151]", cell: (s) => s.property_address ?? "—" })
   }
-  columns.push({ key: "client", header: "Client", tdClassName: "font-semibold text-[#0d1117]", cell: (s) => (s.clients ? `${s.clients.first_name} ${s.clients.last_name}` : "—") })
+  columns.push({ key: "client", header: "Client", tdClassName: "font-semibold text-[#0d1117]", cell: (s) => (s.clients ? toTitleCase(`${s.clients.first_name} ${s.clients.last_name}`) : "—") })
   columns.push({ key: "price", header: "Contract Price", sortField: "contract_price", tdClassName: "text-right font-mono text-sm font-semibold text-[#0d1117]", cell: (s) => formatCurrency(s.contract_price) })
   columns.push({ key: "resv", header: "Reservation Date", sortField: "reservation_date", tdClassName: "text-[#374151]", cell: (s) => formatDate(s.reservation_date) })
   columns.push({ key: "comm", header: "Commission", cell: (s) => <StatusBadge value={s.commission_status} type="commission" /> })
